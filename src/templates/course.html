@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <title>{{ course.title }}</title>
+</head>
+<body>
+    {% extends 'layout.html' %}
+
+    {% block content %}
+    <div class="course-details">
+        <h1>{{ course.title }}</h1>
+        <p>{{ course.description }}</p>
+        <h2>Instructor: {{ course.instructor }}</h2>
+        <h3>Duration: {{ course.duration }}</h3>
+        <h4>Topics Covered:</h4>
+        <ul>
+            {% for topic in course.topics %}
+                <li>{{ topic }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endblock %}
+</body>
+</html>
