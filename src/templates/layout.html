@@ -1,30 +1,247 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}Course Explainer{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}TradingScan{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
 </head>
 <body>
-  <header class="site-header">
-    <div class="header-inner">
-      <h1 class="site-title">Course Explainer</h1>
-      <nav>
-        <ul class="main-nav">
-          <li><a href="{{ url_for('index') }}">Home</a></li>
-          <li><a href="{{ url_for('course', course_id=1) }}">Course Details</a></li>
-        </ul>
-      </nav>
-    </div>
-  </header>
+  <div class="scanline-overlay"></div>
+  <div class="noise-overlay"></div>
 
-  <main class="container">
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <div class="nav-logo">
+        <span class="logo-bracket">[</span>
+        <span class="logo-text">TRADING<span class="logo-accent">SCAN</span></span>
+        <span class="logo-bracket">]</span>
+        <span class="logo-blink">_</span>
+      </div>
+      <div class="nav-right">
+        <div class="nav-status">
+          <span class="status-dot"></span>
+          <span class="status-text">SYSTEM ONLINE</span>
+          <span class="nav-clock" id="nav-clock"></span>
+        </div>
+
+        <!-- Schwab auth status (only shown when DATA_PROVIDER=schwab) -->
+        <div class="schwab-status" id="schwab-status" style="display:none">
+          <span class="schwab-dot" id="schwab-dot"></span>
+          <span class="schwab-label" id="schwab-label">SCHWAB</span>
+          <button class="schwab-action-btn" id="schwab-action-btn"></button>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ── Schwab Login Modal ─────────────────────────────────────────── -->
+  <div class="schwab-modal-backdrop" id="schwab-modal" style="display:none" role="dialog">
+    <div class="schwab-modal-box">
+      <div class="schwab-modal-header">
+        <span class="schwab-modal-title">// CONNECT SCHWAB</span>
+        <button class="modal-close-btn" id="modal-close-btn">✕</button>
+      </div>
+
+      <div class="schwab-modal-body">
+        <!-- Step 1 -->
+        <div class="auth-step" id="auth-step-1">
+          <div class="step-num">01</div>
+          <div class="step-content">
+            <div class="step-title">Open Schwab Login</div>
+            <div class="step-desc">Click to open the Schwab authorization page in a new tab.</div>
+            <button class="auth-open-btn" id="auth-open-btn">↗ OPEN SCHWAB LOGIN</button>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="auth-step">
+          <div class="step-num">02</div>
+          <div class="step-content">
+            <div class="step-title">Copy the Redirect URL</div>
+            <div class="step-desc">
+              After logging in, your browser will redirect to a page that
+              <strong>may show a connection error</strong> — this is expected.
+              Copy the <strong>full URL</strong> from your browser's address bar.
+            </div>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="auth-step">
+          <div class="step-num">03</div>
+          <div class="step-content">
+            <div class="step-title">Paste & Complete</div>
+            <textarea
+              id="redirect-url-input"
+              class="redirect-url-input"
+              placeholder="https://127.0.0.1/?code=C0...&session=...&state=..."
+              rows="3"
+              spellcheck="false"
+            ></textarea>
+            <div class="auth-error" id="auth-error"></div>
+            <button class="auth-complete-btn" id="auth-complete-btn">✓ COMPLETE LOGIN</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Disconnect link (only shown when connected) -->
+      <div class="schwab-modal-footer" id="modal-disconnect-wrap" style="display:none">
+        <button class="disconnect-btn" id="modal-disconnect-btn">⊘ Disconnect Schwab</button>
+      </div>
+    </div>
+  </div>
+
+  <main class="main-content">
     {% block content %}{% endblock %}
   </main>
 
-  <footer class="site-footer">
-    <div class="footer-inner">© 2023 Course Explainer App</div>
+  <footer class="footer">
+    <span>TRADINGSCAN v1.0 &mdash; DATA: <span id="footer-provider">—</span> &mdash; NOT FINANCIAL ADVICE</span>
   </footer>
+
+  <script>
+    // ── Clock ──────────────────────────────────────────────────────────
+    function updateClock() {
+      const now = new Date();
+      const t = now.toLocaleTimeString('en-US', { hour12: false, timeZoneName: 'short' });
+      document.getElementById('nav-clock').textContent = t;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+
+    // ── Schwab Auth UI ────────────────────────────────────────────────
+    (function () {
+      const statusDiv  = document.getElementById('schwab-status');
+      const dot        = document.getElementById('schwab-dot');
+      const label      = document.getElementById('schwab-label');
+      const actionBtn  = document.getElementById('schwab-action-btn');
+      const modal      = document.getElementById('schwab-modal');
+      const closeBtn   = document.getElementById('modal-close-btn');
+      const openBtn    = document.getElementById('auth-open-btn');
+      const completeBtn= document.getElementById('auth-complete-btn');
+      const urlInput   = document.getElementById('redirect-url-input');
+      const errDiv     = document.getElementById('auth-error');
+      const disconnWrap= document.getElementById('modal-disconnect-wrap');
+      const disconnBtn = document.getElementById('modal-disconnect-btn');
+      const footerProv = document.getElementById('footer-provider');
+
+      let _authUrl = null;
+
+      // ── Poll / check status ─────────────────────────────────────────
+      function checkStatus() {
+        fetch('/auth/schwab/status')
+          .then(r => r.json())
+          .then(applyStatus)
+          .catch(() => {});
+      }
+
+      function applyStatus(s) {
+        footerProv.textContent = (s.provider || 'unknown').toUpperCase();
+
+        if (!s.schwab_active) {
+          statusDiv.style.display = 'none';
+          return;
+        }
+
+        statusDiv.style.display = '';
+
+        if (s.connected) {
+          dot.className   = 'schwab-dot schwab-dot-ok';
+          label.textContent = 'SCHWAB ✓';
+          actionBtn.textContent = '⚙';
+          actionBtn.title = 'Schwab settings';
+          actionBtn.onclick = () => openModal(true);
+        } else {
+          const expired = s.reason === 'expired';
+          dot.className   = 'schwab-dot schwab-dot-err';
+          label.textContent = expired ? 'SCHWAB EXPIRED' : 'SCHWAB';
+          actionBtn.textContent = expired ? '↺ RECONNECT' : 'CONNECT';
+          actionBtn.onclick = () => openModal(false);
+        }
+      }
+
+      // ── Modal ───────────────────────────────────────────────────────
+      function openModal(isConnected) {
+        errDiv.textContent = '';
+        urlInput.value = '';
+        disconnWrap.style.display = isConnected ? '' : 'none';
+        modal.style.display = '';
+        // Fetch fresh auth URL
+        _authUrl = null;
+        openBtn.disabled = true;
+        openBtn.textContent = '↗ LOADING...';
+        fetch('/auth/schwab/start')
+          .then(r => r.json())
+          .then(data => {
+            if (data.error) { errDiv.textContent = data.error; return; }
+            _authUrl = data.auth_url;
+            openBtn.disabled = false;
+            openBtn.textContent = '↗ OPEN SCHWAB LOGIN';
+          })
+          .catch(e => { errDiv.textContent = 'Failed to get auth URL: ' + e.message; });
+      }
+
+      function closeModal() {
+        modal.style.display = 'none';
+        errDiv.textContent  = '';
+        urlInput.value = '';
+      }
+
+      closeBtn.addEventListener('click', closeModal);
+      modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+      openBtn.addEventListener('click', function () {
+        if (_authUrl) window.open(_authUrl, '_blank', 'noopener');
+      });
+
+      completeBtn.addEventListener('click', function () {
+        const url = urlInput.value.trim();
+        if (!url) { errDiv.textContent = 'Please paste the redirect URL first.'; return; }
+
+        errDiv.textContent = '';
+        completeBtn.disabled = true;
+        completeBtn.textContent = '⏳ VERIFYING...';
+
+        fetch('/auth/schwab/complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ redirect_url: url }),
+        })
+          .then(r => r.json())
+          .then(data => {
+            if (data.error) {
+              errDiv.textContent = data.error;
+              completeBtn.disabled = false;
+              completeBtn.textContent = '✓ COMPLETE LOGIN';
+              return;
+            }
+            closeModal();
+            checkStatus();   // Refresh navbar
+          })
+          .catch(e => {
+            errDiv.textContent = 'Request failed: ' + e.message;
+            completeBtn.disabled = false;
+            completeBtn.textContent = '✓ COMPLETE LOGIN';
+          });
+      });
+
+      disconnBtn.addEventListener('click', function () {
+        if (!confirm('Disconnect Schwab? You will need to log in again to use Schwab data.')) return;
+        fetch('/auth/schwab/disconnect', { method: 'POST' })
+          .then(r => r.json())
+          .then(() => { closeModal(); checkStatus(); })
+          .catch(() => { closeModal(); checkStatus(); });
+      });
+
+      // Initial status check + re-check every 60s to catch expiry
+      checkStatus();
+      setInterval(checkStatus, 60000);
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

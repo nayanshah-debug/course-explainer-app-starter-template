@@ -1,3 +1,20 @@
+# Core
 Flask==3.1.2
 gunicorn==20.1.0
-python-dotenv==0.21.0
+python-dotenv==1.0.1
+
+# Data
+yfinance>=0.2.38
+pandas>=2.0.0
+numpy>=1.26.0
+requests>=2.31.0
+
+# Schwab
+schwab-py>=1.5.1
+
+# Robinhood
+robin_stocks>=3.0.0
+
+# Optional providers (uncomment as needed)
+# alpha_vantage>=2.3.1
+# polygon-api-client>=1.13.0

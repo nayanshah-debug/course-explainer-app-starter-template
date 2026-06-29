@@ -1,22 +1,674 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
-    <title>Course Explainer</title>
-</head>
-<body>
-    {% include 'layout.html' %}
-    <div class="container">
-        <h1>Welcome to the Course Explainer</h1>
-        <p>This application provides an overview of various courses available.</p>
-        <h2>Available Courses</h2>
-        <ul>
-            <li><a href="{{ url_for('course', course_id=1) }}">Course 1</a></li>
-            <li><a href="{{ url_for('course', course_id=2) }}">Course 2</a></li>
-            <li><a href="{{ url_for('course', course_id=3) }}">Course 3</a></li>
-        </ul>
+{% extends "layout.html" %}
+
+{% block title %}TradingScan — Stock Scanner{% endblock %}
+
+{% block content %}
+<div class="scanner-layout">
+
+  <!-- CONTROL PANEL -->
+  <aside class="control-panel">
+    <div class="panel-header">
+      <span class="panel-label">// SCAN PARAMETERS</span>
     </div>
-</body>
-</html>
+
+    <!-- Universe -->
+    <div class="param-group">
+      <label class="param-title">UNIVERSE</label>
+      <div class="seg-control" id="universe-control">
+        <button class="seg-btn active" data-value="dow">DOW 30</button>
+        <button class="seg-btn" data-value="nasdaq">NASDAQ</button>
+        <button class="seg-btn" data-value="nyse">NYSE</button>
+        <button class="seg-btn" data-value="nasdaq_nyse">NASDAQ+NYSE</button>
+        <button class="seg-btn" data-value="all_us">ALL US $4+</button>
+      </div>
+      <input type="hidden" id="universe-val" value="dow" />
+      <div class="universe-hint" id="universe-hint"></div>
+    </div>
+
+    <!-- Symbol override -->
+    <div class="param-group">
+      <label class="param-title">SCAN SPECIFIC SYMBOLS <span class="param-optional">(overrides universe)</span></label>
+      <textarea
+        id="symbols-input"
+        class="symbols-textarea"
+        placeholder="AAPL, HOOD, NVDA, TSLA ..."
+        rows="2"
+        spellcheck="false"
+      ></textarea>
+      <div class="symbols-hint">Comma or space separated. Leave blank to use universe above.</div>
+    </div>
+
+    <!-- Interval -->
+    <div class="param-group">
+      <label class="param-title">INTERVAL</label>
+      <div class="seg-control" id="interval-control">
+        <button class="seg-btn active" data-value="1d">1D</button>
+        <button class="seg-btn" data-value="1wk">1WK</button>
+        <button class="seg-btn" data-value="1mo">1MO</button>
+      </div>
+      <input type="hidden" id="interval-val" value="1d" />
+    </div>
+
+    <!-- Period -->
+    <div class="param-group">
+      <label class="param-title">LOOKBACK PERIOD</label>
+      <div class="seg-control" id="period-control">
+        <button class="seg-btn" data-value="1mo">1MO</button>
+        <button class="seg-btn" data-value="3mo">3MO</button>
+        <button class="seg-btn" data-value="6mo">6MO</button>
+        <button class="seg-btn active" data-value="1y">1Y</button>
+        <button class="seg-btn" data-value="2y">2Y</button>
+      </div>
+      <input type="hidden" id="period-val" value="1y" />
+    </div>
+
+    <!-- Filters -->
+    <div class="param-group filters-group">
+      <div class="filters-header">
+        <label class="param-title">FILTERS</label>
+        <button class="add-filter-btn" id="add-filter-btn" disabled>
+          <span>+ ADD FILTER</span>
+        </button>
+      </div>
+      <div id="filter-rows-container">
+        <!-- filter rows injected here -->
+      </div>
+      <div id="no-filters-msg" class="no-filters-msg">No filters — scan all stocks</div>
+    </div>
+
+    <!-- Run -->
+    <button class="run-btn" id="run-btn">
+      <span class="run-btn-text">&#9654; RUN SCAN</span>
+    </button>
+  </aside>
+
+  <!-- RESULTS PANEL -->
+  <section class="results-panel">
+    <div class="panel-header results-header">
+      <span class="panel-label">// SCAN RESULTS</span>
+      <div class="stats-bar" id="stats-bar" style="display:none">
+        <span id="stat-progress"></span>
+        <span id="stat-matched" class="accent-green">—</span> matched &nbsp;|&nbsp;
+        <span id="stat-time">—</span>ms &nbsp;|&nbsp;
+        <button id="copy-tickers-btn" class="copy-tickers-btn" title="Copy tickers as CSV for TradingView watchlist">&#9112; COPY TICKERS</button>
+      </div>
+    </div>
+
+    <!-- Idle state -->
+    <div class="results-idle" id="results-idle">
+      <div class="idle-grid"></div>
+      <div class="idle-text">
+        <span class="idle-icon">◈</span>
+        <p>Configure filters and run a scan.</p>
+        <p class="idle-sub">Supports NASDAQ &amp; DOW JONES universes.</p>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="results-loading" id="results-loading" style="display:none">
+      <div class="spinner-ring"></div>
+      <div class="loading-text">SCANNING<span class="dot-anim">...</span></div>
+      <div class="progress-bar-wrap">
+        <div class="progress-bar-track">
+          <div class="progress-bar-fill" id="progress-bar-fill"></div>
+        </div>
+        <div class="progress-label" id="progress-label">0 / 0</div>
+      </div>
+    </div>
+
+    <!-- Results table -->
+    <div id="results-table-wrap" style="display:none">
+      <table class="results-table" id="results-table">
+        <thead>
+          <tr>
+            <th data-col="ticker" class="sortable">TICKER <span class="sort-icon">⇅</span></th>
+            <th data-col="price" class="sortable">PRICE <span class="sort-icon">⇅</span></th>
+            <th data-col="change_pct" class="sortable">CHG% <span class="sort-icon">⇅</span></th>
+            <th data-col="volume" class="sortable">VOLUME <span class="sort-icon">⇅</span></th>
+            <th data-col="avg_volume" class="sortable">AVG VOL <span class="sort-icon">⇅</span></th>
+            <th data-col="rel_volume" class="sortable">RVOL <span class="sort-icon">⇅</span></th>
+            <th data-col="signal_date" class="sortable">SIGNAL DATE <span class="sort-icon">⇅</span></th>
+            <th>FILTERS MATCHED</th>
+            <th>CHART</th>
+            <th>BUY</th>
+          </tr>
+        </thead>
+        <tbody id="results-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- No results -->
+    <div id="results-empty" style="display:none" class="results-empty">
+      <span class="empty-icon">◌</span>
+      <p>No stocks matched the selected filters.</p>
+    </div>
+  </section>
+
+</div>
+
+<!-- ── Buy Modal ──────────────────────────────────────────────────────── -->
+<div class="buy-modal-backdrop" id="buy-modal-backdrop" style="display:none" role="dialog" aria-modal="true">
+  <div class="buy-modal-box">
+    <div class="buy-modal-header">
+      <span class="buy-modal-title">BUY <span id="buy-modal-ticker"></span></span>
+      <button class="buy-modal-close" id="buy-modal-close" title="Close">&times;</button>
+    </div>
+    <div class="buy-modal-body">
+      <div class="buy-modal-row">
+        <span class="buy-modal-label">BID / ASK</span>
+        <span class="buy-modal-value" id="buy-modal-bidask"><span class="buy-modal-fetching">fetching...</span></span>
+      </div>
+      <div class="buy-modal-row">
+        <span class="buy-modal-label">LIMIT PRICE ($)</span>
+        <input class="buy-modal-input" id="buy-limit-input" type="number" min="0.01" step="0.01" placeholder="fetching..." />
+      </div>
+      <div class="buy-modal-row">
+        <span class="buy-modal-label">DOLLAR AMOUNT ($)</span>
+        <input class="buy-modal-input" id="buy-dollar-input" type="number" min="1" step="1" value="1000" />
+      </div>
+      <div class="buy-modal-row">
+        <span class="buy-modal-label">SHARES TO BUY</span>
+        <span class="buy-modal-value accent-green" id="buy-modal-qty">—</span>
+      </div>
+      <div class="buy-modal-row">
+        <span class="buy-modal-label">EST. TOTAL</span>
+        <span class="buy-modal-value" id="buy-modal-total">—</span>
+      </div>
+    </div>
+    <div class="buy-modal-footer">
+      <div class="buy-modal-status" id="buy-modal-status"></div>
+      <button class="buy-confirm-btn" id="buy-confirm-btn">PLACE ORDER</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  'use strict';
+
+  // ── State ───────────────────────────────────────────────────────────────
+  let filterRegistry = [];   // [{name, description, params}]
+  let sortState = { col: 'ticker', dir: 1 };
+
+  // ── Universe hints ───────────────────────────────────────────────────────
+  const UNIVERSE_HINTS = {
+    dow:         '30 stocks — fast scan',
+    nasdaq:      '~4,000 stocks',
+    nyse:        '~3,000 stocks',
+    nasdaq_nyse: '~7,000 stocks — slow scan',
+    both:        '~4,044 stocks',
+    all_us:      '~5,200 stocks + ETFs ≥ $4 — slow scan',
+  };
+
+  function updateUniverseHint(val) {
+    const el = document.getElementById('universe-hint');
+    if (el) el.textContent = UNIVERSE_HINTS[val] || '';
+  }
+
+  // ── Segmented controls ──────────────────────────────────────────────────
+  document.querySelectorAll('.seg-control').forEach(function (ctrl) {
+    const hiddenId = ctrl.id.replace('-control', '-val');
+    const hidden   = document.getElementById(hiddenId);
+    ctrl.querySelectorAll('.seg-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        ctrl.querySelectorAll('.seg-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        hidden.value = btn.dataset.value;
+        if (ctrl.id === 'universe-control') updateUniverseHint(btn.dataset.value);
+      });
+    });
+  });
+  updateUniverseHint('dow');
+
+  // ── Load filter registry ─────────────────────────────────────────────────
+  fetch('/api/filters')
+    .then(r => r.json())
+    .then(data => {
+      filterRegistry = data.filters || [];
+      document.getElementById('add-filter-btn').disabled = false;
+      // Auto-add VMC Cipher B filter by default
+      const vmcFilter = filterRegistry.find(f => f.name === 'vmc_cipher_b');
+      if (vmcFilter) {
+        addFilterRow();
+        const container = document.getElementById('filter-rows-container');
+        const lastRow = container.lastElementChild;
+        const sel = lastRow.querySelector('.filter-select');
+        sel.value = 'vmc_cipher_b';
+        renderParamInputs(lastRow, 'vmc_cipher_b');
+      }
+    })
+    .catch(() => {
+      document.getElementById('add-filter-btn').disabled = false;
+    });
+
+  // ── Filter rows ──────────────────────────────────────────────────────────
+  document.getElementById('add-filter-btn').addEventListener('click', addFilterRow);
+
+  function addFilterRow() {
+    const container = document.getElementById('filter-rows-container');
+    document.getElementById('no-filters-msg').style.display = 'none';
+
+    const row = document.createElement('div');
+    row.className = 'filter-row';
+    row.innerHTML = buildFilterRowHTML();
+    container.appendChild(row);
+
+    // Trigger animation
+    requestAnimationFrame(() => row.classList.add('filter-row-visible'));
+
+    // Bind select change
+    row.querySelector('.filter-select').addEventListener('change', function () {
+      renderParamInputs(row, this.value);
+    });
+
+    // Bind remove
+    row.querySelector('.remove-filter-btn').addEventListener('click', function () {
+      row.classList.remove('filter-row-visible');
+      setTimeout(() => {
+        row.remove();
+        if (!container.children.length)
+          document.getElementById('no-filters-msg').style.display = '';
+      }, 260);
+    });
+
+    // Pre-render params for default selected filter
+    const sel = row.querySelector('.filter-select');
+    if (sel.value) renderParamInputs(row, sel.value);
+  }
+
+  function buildFilterRowHTML() {
+    const opts = filterRegistry.length
+      ? filterRegistry.map(f =>
+          `<option value="${esc(f.name)}">${esc(f.name.replace(/_/g,' ').toUpperCase())}</option>`
+        ).join('')
+      : '<option value="">No filters loaded</option>';
+
+    return `
+      <div class="filter-row-top">
+        <select class="filter-select">${opts}</select>
+        <button class="remove-filter-btn" title="Remove filter">✕</button>
+      </div>
+      <div class="filter-params"></div>
+    `;
+  }
+
+  function renderParamInputs(row, filterName) {
+    const filter = filterRegistry.find(f => f.name === filterName);
+    const paramsDiv = row.querySelector('.filter-params');
+    paramsDiv.innerHTML = '';
+    if (!filter || !filter.params || !Object.keys(filter.params).length) return;
+
+    Object.entries(filter.params).forEach(([key, schema]) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'param-input-wrap';
+      wrap.innerHTML = `
+        <label class="param-input-label">${esc(schema.label || key)}</label>
+        <input
+          class="param-input"
+          type="number"
+          data-param="${esc(key)}"
+          value="${schema.default ?? ''}"
+          step="${schema.type === 'float' ? '0.1' : '1'}"
+        />
+      `;
+      paramsDiv.appendChild(wrap);
+    });
+  }
+
+  // ── Collect filters from UI ──────────────────────────────────────────────
+  function collectFilters() {
+    const rows = document.querySelectorAll('.filter-row');
+    return Array.from(rows).map(row => {
+      const name = row.querySelector('.filter-select').value;
+      const params = {};
+      row.querySelectorAll('.param-input').forEach(inp => {
+        const val = parseFloat(inp.value);
+        params[inp.dataset.param] = isNaN(val) ? inp.value : val;
+      });
+      return { name, params };
+    });
+  }
+
+  // ── Run scan ─────────────────────────────────────────────────────────────
+  document.getElementById('run-btn').addEventListener('click', runScan);
+
+  let _allResults = [];
+  let _pollTimer  = null;
+
+  function runScan() {
+    const btn = document.getElementById('run-btn');
+    btn.disabled = true;
+    btn.querySelector('.run-btn-text').textContent = '⏳ SCANNING...';
+
+    _allResults = [];
+    if (_pollTimer) { clearTimeout(_pollTimer); _pollTimer = null; }
+    showState('loading');
+
+    // Reset progress UI
+    document.getElementById('progress-bar-fill').style.width = '0%';
+    document.getElementById('progress-label').textContent = '0 / 0';
+    document.getElementById('stats-bar').style.display = '';
+    document.getElementById('stat-progress').textContent = '0 / 0 scanned  ';
+    document.getElementById('stat-matched').textContent = '0';
+    document.getElementById('stat-time').textContent = '—';
+
+    const rawSymbols = document.getElementById('symbols-input').value;
+    const symbols = rawSymbols
+      .split(/[\s,]+/)
+      .map(s => s.trim().toUpperCase())
+      .filter(Boolean);
+
+    const payload = {
+      universe: symbols.length ? 'symbols' : document.getElementById('universe-val').value,
+      interval: document.getElementById('interval-val').value,
+      period:   document.getElementById('period-val').value,
+      filters:  collectFilters(),
+      symbols:  symbols,
+    };
+
+    const t0 = performance.now();
+
+    fetch('/api/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        pollJob(data.job_id, t0, btn);
+      })
+      .catch(err => {
+        showState('idle');
+        alert('Scan failed: ' + err.message);
+        btn.disabled = false;
+        btn.querySelector('.run-btn-text').textContent = '▶ RUN SCAN';
+      });
+  }
+
+  function pollJob(jobId, t0, btn) {
+    function tick() {
+      fetch('/api/scan/' + jobId)
+        .then(r => r.json())
+        .then(job => {
+          const completed = job.completed || 0;
+          const total     = job.total     || 0;
+          const matched   = job.matched   || 0;
+          const pct       = total > 0 ? (completed / total * 100) : 0;
+
+          document.getElementById('progress-bar-fill').style.width = pct.toFixed(1) + '%';
+          document.getElementById('progress-label').textContent = completed + ' / ' + total;
+          document.getElementById('stat-progress').textContent = completed + ' / ' + total + ' scanned  ';
+          document.getElementById('stat-matched').textContent  = matched.toLocaleString();
+
+          if (job.status === 'done' || job.status === 'error') {
+            const elapsed = Math.round(performance.now() - t0);
+            document.getElementById('stat-time').textContent = elapsed.toLocaleString();
+            btn.disabled = false;
+            btn.querySelector('.run-btn-text').textContent = '▶ RUN SCAN';
+
+            if (job.status === 'error') {
+              showState('idle');
+              alert('Scan error: ' + (job.error || 'unknown error'));
+              return;
+            }
+
+            _allResults = job.results || [];
+            if (!_allResults.length) { showState('empty'); return; }
+            sortState = { col: 'ticker', dir: 1 };
+            renderTable(_allResults);
+            showState('table');
+          } else {
+            _pollTimer = setTimeout(tick, 500);
+          }
+        })
+        .catch(err => {
+          btn.disabled = false;
+          btn.querySelector('.run-btn-text').textContent = '▶ RUN SCAN';
+          showState('idle');
+          alert('Poll error: ' + err.message);
+        });
+    }
+    tick();
+  }
+
+  // ── Render results ────────────────────────────────────────────────────────
+  function renderTable(results) {
+    const sorted = [...results].sort(comparator(sortState.col, sortState.dir));
+    const tbody  = document.getElementById('results-tbody');
+    tbody.innerHTML = '';
+
+    sorted.forEach((r, i) => {
+      const chgClass  = r.change_pct >= 0 ? 'pos' : 'neg';
+      const chgPrefix = r.change_pct >= 0 ? '+' : '';
+      const volFmt    = formatVolume(r.volume);
+      const filters   = (r.matched_filters || []).map(f =>
+        `<span class="filter-tag">${esc(f.replace(/_/g,' '))}</span>`).join('');
+      const chartUrl  = `https://www.tradingview.com/chart/?symbol=NASDAQ:${encodeURIComponent(r.ticker)}`;
+
+      const tr = document.createElement('tr');
+      tr.style.animationDelay = `${i * 30}ms`;
+      tr.className = 'result-row';
+      tr.innerHTML = `
+        <td class="ticker-cell">${esc(r.ticker)}</td>
+        <td class="num-cell">$${r.price.toFixed(2)}</td>
+        <td class="num-cell ${chgClass}">${chgPrefix}${r.change_pct.toFixed(2)}%</td>
+        <td class="num-cell">${volFmt}</td>
+        <td class="num-cell">${formatVolume(r.avg_volume || 0)}</td>
+        <td class="num-cell ${rvolClass(r.rel_volume)}">${r.rel_volume != null ? r.rel_volume.toFixed(2) + 'x' : '—'}</td>
+        <td class="num-cell signal-date">${esc(r.signal_date || '—')}</td>
+        <td class="filters-cell">${filters || '<span class="dim">—</span>'}</td>
+        <td><a class="chart-link" href="${chartUrl}" target="_blank" rel="noopener">↗ CHART</a></td>
+        <td><button class="buy-btn" data-ticker="${esc(r.ticker)}" data-price="${r.price}">BUY</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ── Sorting ───────────────────────────────────────────────────────────────
+  document.querySelectorAll('th.sortable').forEach(th => {
+    th.addEventListener('click', function () {
+      const col = this.dataset.col;
+      if (sortState.col === col) sortState.dir *= -1;
+      else { sortState.col = col; sortState.dir = 1; }
+
+      document.querySelectorAll('th.sortable').forEach(h => h.classList.remove('sort-asc','sort-desc'));
+      this.classList.add(sortState.dir === 1 ? 'sort-asc' : 'sort-desc');
+
+      // Re-render from stored results data
+      if (_allResults.length) renderTable(_allResults);
+    });
+  });
+
+  function comparator(col, dir) {
+    return function (a, b) {
+      const av = a[col], bv = b[col];
+      if (typeof av === 'string') return dir * av.localeCompare(bv);
+      return dir * (av - bv);
+    };
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function showState(state) {
+    document.getElementById('results-idle').style.display        = state === 'idle'    ? '' : 'none';
+    document.getElementById('results-loading').style.display     = state === 'loading' ? '' : 'none';
+    document.getElementById('results-table-wrap').style.display  = state === 'table'   ? '' : 'none';
+    document.getElementById('results-empty').style.display       = state === 'empty'   ? '' : 'none';
+  }
+
+  function formatVolume(v) {
+    if (v >= 1e9) return (v / 1e9).toFixed(2) + 'B';
+    if (v >= 1e6) return (v / 1e6).toFixed(2) + 'M';
+    if (v >= 1e3) return (v / 1e3).toFixed(1) + 'K';
+    return v.toString();
+  }
+
+  function rvolClass(rv) {
+    if (!rv) return '';
+    if (rv >= 2)   return 'rvol-high';
+    if (rv >= 1.5) return 'rvol-med';
+    return 'rvol-low';
+  }
+
+  function parseRawVolume(str) {
+    str = str.trim();
+    if (str.endsWith('B')) return parseFloat(str) * 1e9;
+    if (str.endsWith('M')) return parseFloat(str) * 1e6;
+    if (str.endsWith('K')) return parseFloat(str) * 1e3;
+    return parseFloat(str) || 0;
+  }
+
+  function esc(str) {
+    return String(str)
+      .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── Copy tickers ─────────────────────────────────────────────────────
+  document.getElementById('copy-tickers-btn').addEventListener('click', function () {
+    if (!_allResults.length) return;
+    const csv = _allResults.map(r => r.ticker).join(', ');
+    navigator.clipboard.writeText(csv).then(() => {
+      const btn = this;
+      btn.textContent = '✓ COPIED';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.innerHTML = '&#9112; COPY TICKERS';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  });
+
+  // Init idle
+  showState('idle');
+
+  // ── Buy Modal ─────────────────────────────────────────────────────────────
+  let _buyTicker = '';
+
+  function openBuyModal(ticker, lastPrice) {
+    _buyTicker = ticker;
+    document.getElementById('buy-modal-ticker').textContent  = ticker;
+    document.getElementById('buy-modal-bidask').innerHTML    = '<span class="buy-modal-fetching">fetching...</span>';
+    document.getElementById('buy-limit-input').value         = '';
+    document.getElementById('buy-limit-input').placeholder  = 'fetching...';
+    document.getElementById('buy-dollar-input').value        = '1000';
+    document.getElementById('buy-modal-qty').textContent     = '—';
+    document.getElementById('buy-modal-total').textContent   = '—';
+    document.getElementById('buy-modal-status').textContent  = '';
+    document.getElementById('buy-modal-status').className    = 'buy-modal-status';
+    document.getElementById('buy-confirm-btn').disabled      = true;
+    document.getElementById('buy-modal-backdrop').style.display = '';
+
+    // Fetch live bid/ask midpoint
+    fetch('/trade/rh/quote/' + encodeURIComponent(ticker))
+      .then(r => r.json())
+      .then(q => {
+        if (q.error) throw new Error(q.error);
+        const bidAskEl = document.getElementById('buy-modal-bidask');
+        bidAskEl.innerHTML =
+          '<span class="bid-val">$' + q.bid.toFixed(4) + '</span>' +
+          '<span class="ba-sep"> / </span>' +
+          '<span class="ask-val">$' + q.ask.toFixed(4) + '</span>';
+        document.getElementById('buy-limit-input').value       = q.mid.toFixed(2);
+        document.getElementById('buy-limit-input').placeholder = '';
+        document.getElementById('buy-confirm-btn').disabled    = false;
+        updateBuyCalc();
+        document.getElementById('buy-dollar-input').focus();
+      })
+      .catch(err => {
+        document.getElementById('buy-modal-bidask').textContent = 'unavailable';
+        // Fall back to last price from scan results
+        document.getElementById('buy-limit-input').value       = lastPrice.toFixed(2);
+        document.getElementById('buy-limit-input').placeholder = '';
+        document.getElementById('buy-confirm-btn').disabled    = false;
+        updateBuyCalc();
+      });
+  }
+
+  function closeBuyModal() {
+    document.getElementById('buy-modal-backdrop').style.display = 'none';
+  }
+
+  function updateBuyCalc() {
+    const limitPrice = parseFloat(document.getElementById('buy-limit-input').value) || 0;
+    const dollars    = parseFloat(document.getElementById('buy-dollar-input').value) || 0;
+    const qty        = limitPrice > 0 ? Math.ceil(dollars / limitPrice) : 0;
+    const total      = qty * limitPrice;
+    document.getElementById('buy-modal-qty').textContent   = qty > 0 ? qty.toLocaleString() : '—';
+    document.getElementById('buy-modal-total').textContent = qty > 0 ? '$' + total.toFixed(2) : '—';
+  }
+
+  document.getElementById('buy-limit-input').addEventListener('input', updateBuyCalc);
+  document.getElementById('buy-dollar-input').addEventListener('input', updateBuyCalc);
+
+  // Open modal via delegated click on BUY buttons (results rendered dynamically)
+  document.getElementById('results-tbody').addEventListener('click', function (e) {
+    const btn = e.target.closest('.buy-btn');
+    if (!btn) return;
+    openBuyModal(btn.dataset.ticker, parseFloat(btn.dataset.price));
+  });
+
+  document.getElementById('buy-modal-close').addEventListener('click', closeBuyModal);
+  document.getElementById('buy-modal-backdrop').addEventListener('click', function (e) {
+    if (e.target === this) closeBuyModal();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeBuyModal();
+  });
+
+  document.getElementById('buy-confirm-btn').addEventListener('click', function () {
+    const ticker      = _buyTicker;
+    const limitPrice  = parseFloat(document.getElementById('buy-limit-input').value) || 0;
+    const dollars     = parseFloat(document.getElementById('buy-dollar-input').value) || 0;
+    const qty         = limitPrice > 0 ? Math.ceil(dollars / limitPrice) : 0;
+
+    if (limitPrice <= 0) {
+      document.getElementById('buy-modal-status').textContent = 'Enter a valid limit price.';
+      document.getElementById('buy-modal-status').className   = 'buy-modal-status error';
+      return;
+    }
+    if (qty <= 0) {
+      document.getElementById('buy-modal-status').textContent = 'Enter a valid dollar amount.';
+      document.getElementById('buy-modal-status').className   = 'buy-modal-status error';
+      return;
+    }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'PLACING...';
+    document.getElementById('buy-modal-status').textContent = '';
+
+    fetch('/trade/rh/buy', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ ticker, quantity: qty, limit_price: limitPrice }),
+    })
+      .then(r => {
+        const ct = r.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          return r.text().then(() => { throw new Error(`HTTP ${r.status}: server returned non-JSON. Is Flask restarted?`); });
+        }
+        return r.json();
+      })
+      .then(data => {
+        if (data.error) throw new Error(data.error);
+        const statusEl = document.getElementById('buy-modal-status');
+        statusEl.textContent = `Limit order placed @ $${data.limit_price} × ${data.quantity} shares. ID: ${data.order_id}`;
+        statusEl.className   = 'buy-modal-status ok';
+        btn.textContent = 'PLACE ORDER';
+        btn.disabled = false;
+      })
+      .catch(err => {
+        const statusEl = document.getElementById('buy-modal-status');
+        statusEl.textContent = 'Error: ' + err.message;
+        statusEl.className   = 'buy-modal-status error';
+        btn.textContent = 'PLACE ORDER';
+        btn.disabled = false;
+      });
+  });
+
+})();
+</script>
+{% endblock %}
